@@ -62,13 +62,13 @@ export async function initFirebase() {
   // would for the full listen→rules-check→data round trip.
 export async function initFirebase() {
   try {
-    console.log("🔄 Starting Firebase (v3 Bulletproof)...");
+    console.log("🔄 Starting Firebase Connection...");
 
-    // 1. Import Core & prevent "App already exists" crash
+    // 1. Core Init (Prevents 'App already exists' crash)
     const { initializeApp, getApps, getApp } = await import("https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js");
     const app = getApps().length === 0 ? initializeApp(FB_CFG) : getApp();
 
-    // 2. Setup Firestore (Database) with Long Polling fix
+    // 2. Firestore Init (With robust network settings)
     const { initializeFirestore, doc, setDoc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js");
     
     _db = initializeFirestore(app, {
@@ -79,9 +79,9 @@ export async function initFirebase() {
     _doc = doc;
     _getDoc = getDoc;
     _dbReady = true;
-    console.log("✅ Firestore Database Ready!");
+    console.log("✅ Database Ready!");
 
-    // 3. Safely setup Storage (Prevents crash since you skipped Step 2)
+    // 3. Storage Init (Isolated so it doesn't crash the Database if skipped)
     try {
       const { getStorage, ref, uploadBytes, getDownloadURL } = await import("https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js");
       _storage = getStorage(app);
@@ -91,12 +91,11 @@ export async function initFirebase() {
       _storageReady = true;
       console.log("✅ Storage Ready!");
     } catch (storageError) {
-      console.warn("⚠ Storage skipped. You must use image URLs instead of uploading.");
+      console.warn("⚠ Storage skipped. URLs will be used for images.");
     }
 
   } catch (error) {
     console.error("❌ Firebase init failed:", error);
-    alert("Firebase connection error. Check console.");
   }
 }
 
