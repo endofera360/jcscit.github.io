@@ -12,7 +12,6 @@ const FB_CFG = {
   appId:             "1:253384399169:web:5cded88ff939564cec69c0",
   measurementId:     "G-M3W7GSCG5P"
 };
-
 // ─── State ──────────────────────────────────────────────────
 let _db = null, _storage = null, _dbReady = false, _storageReady = false;
 let _setDoc, _doc, _getDoc, _ref, _uploadBytes, _getURL;
