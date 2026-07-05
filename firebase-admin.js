@@ -15,37 +15,89 @@ const FB_CFG = {
 };
 
 // ─── State ──────────────────────────────────────────────────
-let _db = null, _storage = null, _ready = false;
+let _db = null, _storage = null, _dbReady = false, _storageReady = false;
 let _setDoc, _doc, _getDoc, _ref, _uploadBytes, _getURL;
 
+export function isStorageReady() { return _storageReady; }
+export function isDbReady() { return _dbReady; }
+
+// ─── Timeout helper — prevents any hung network call from
+//     freezing the UI forever. Firestore's default WebChannel
+//     transport can be silently blocked by some ISPs/proxies,
+//     which causes a promise that never resolves AND never
+//     rejects. Racing it against a timer guarantees we always
+//     get a result one way or the other. ─────────────────────
+function withTimeout(promise, ms, label) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${ms/1000}s — likely blocked by network/firewall`));
+    }, ms);
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); }
+    );
+  });
+}
+
 // ─── Init ───────────────────────────────────────────────────
+// Firestore and Storage are initialized independently so that
+// a Storage problem (e.g. bucket not provisioned yet, billing
+// not set up) never blocks Firestore-only actions like text
+// edits and "Link" images from saving.
 export async function initFirebase() {
+  let app;
   try {
     const { initializeApp, getApps } = await import(
       "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js");
-    const { getFirestore, doc, getDoc, setDoc } = await import(
+    app = getApps().length ? getApps()[0] : initializeApp(FB_CFG);
+  } catch(e) {
+    console.warn("Firebase app init failed:", e.message);
+    return;
+  }
+
+  // Firestore — uses long-polling auto-detection. The default
+  // WebChannel/streaming transport gets silently blackholed by
+  // some ISPs and corporate proxies (common in parts of South
+  // Asia): no error is thrown, the request just never resolves.
+  // experimentalAutoDetectLongPolling fixes that class of hang.
+  try {
+    const { initializeFirestore, doc, getDoc, setDoc } = await import(
       "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+    _db = initializeFirestore(app, {
+      experimentalAutoDetectLongPolling: true,
+      useFetchStreams: false
+    });
+    _setDoc = setDoc; _doc = doc; _getDoc = getDoc;
+    _dbReady = true;
+    console.log("✅ Firestore ready");
+  } catch(e) {
+    console.warn("Firestore init failed:", e.message);
+  }
+
+  // Storage — optional. Fine for this to fail if the user
+  // hasn't provisioned/paid for Storage yet; Link-based images
+  // and text edits don't need it at all.
+  try {
     const { getStorage, ref, uploadBytes, getDownloadURL } = await import(
       "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js");
-
-    const app = getApps().length ? getApps()[0] : initializeApp(FB_CFG);
-    _db      = getFirestore(app);
     _storage = getStorage(app);
-    _setDoc  = setDoc; _doc = doc; _getDoc = getDoc;
     _ref = ref; _uploadBytes = uploadBytes; _getURL = getDownloadURL;
-    _ready = true;
-    console.log("✅ Firebase ready");
-    await loadAndApplyContent();
+    _storageReady = true;
+    console.log("✅ Storage ready");
   } catch(e) {
-    console.warn("Firebase init failed:", e.message);
+    console.warn("Storage not available (fine if you're only using Link uploads):", e.message);
   }
+
+  if (_dbReady) await loadAndApplyContent();
 }
 
 // ─── Firestore: load & apply to DOM ─────────────────────────
 export async function loadAndApplyContent() {
-  if (!_ready) return;
+  if (!_dbReady) return;
   try {
-    const snap = await _getDoc(_doc(_db, "site-content", "global"));
+    const snap = await withTimeout(
+      _getDoc(_doc(_db, "site-content", "global")), 12000, "Load content"
+    );
     if (!snap.exists()) return;
     const data = snap.data();
 
@@ -114,32 +166,37 @@ function applyHeroCover(data) {
 
 // ─── Firestore: save ─────────────────────────────────────────
 async function saveToFirebase(payload) {
-  if (!_ready) { showToast("⚠ Firebase not connected"); return false; }
+  if (!_dbReady) { showToast("⚠ Firestore not connected", "error"); return false; }
   try {
     const ref2 = _doc(_db, "site-content", "global");
     let existing = {};
     try {
-      const snap = await _getDoc(ref2);
+      const snap = await withTimeout(_getDoc(ref2), 12000, "Fetch existing data");
       if (snap.exists()) existing = snap.data();
-    } catch(_) {}
+    } catch(e) {
+      console.warn("Couldn't fetch existing data (continuing with a fresh write):", e.message);
+    }
 
-    await _setDoc(ref2, {
+    await withTimeout(_setDoc(ref2, {
       texts:     Object.assign({}, existing.texts     || {}, payload.texts     || {}),
       images:    Object.assign({}, existing.images    || {}, payload.images    || {}),
       heroCover: payload.heroCover !== undefined ? payload.heroCover : (existing.heroCover || null),
       updatedAt: new Date().toISOString()
-    });
+    }), 12000, "Save to Firestore");
     return true;
   } catch(e) {
     console.error("Save error:", e);
-    showToast("⚠ Save failed: " + e.message);
+    const msg = /timed out/.test(e.message)
+      ? "⚠ Save timed out — check your network or Firestore rules"
+      : "⚠ Save failed: " + e.message;
+    showToast(msg, "error");
     return false;
   }
 }
 
 // ─── Storage: upload a File → URL ────────────────────────────
 async function uploadFile(file, path, onProgress) {
-  if (!_ready) throw new Error("Storage not ready");
+  if (!_storageReady) throw new Error("Storage isn't set up yet — use the Link tab instead, or add Storage billing in Firebase");
   // Use XMLHttpRequest for progress — avoids resumable complexity
   return new Promise((resolve, reject) => {
     const storageRef = _ref(_storage, path);
@@ -476,6 +533,13 @@ function buildImageField(key, currentSrc, shape = "circle") {
   label.style.marginBottom = "8px";
   wrap.appendChild(label);
 
+  if (!_storageReady) {
+    const warn = document.createElement("div");
+    warn.style.cssText = "font-size:0.66rem;color:#F5C518;background:rgba(245,197,24,0.08);border:1px solid rgba(245,197,24,0.25);border-radius:4px;padding:6px 8px;margin-bottom:8px;font-family:'Share Tech Mono',monospace;";
+    warn.textContent = "⚠ Storage not set up — use Link instead of Upload for now";
+    wrap.appendChild(warn);
+  }
+
   // Preview
   const preview = document.createElement("img");
   preview.className = shape === "circle" ? "_imgpreview" : "_imgpreview-rect";
@@ -568,6 +632,13 @@ function buildCoverSection() {
   const hdr = document.createElement("div");
   hdr.className = "_sec-hdr"; hdr.textContent = "🎬 Hero Cover (Image/GIF/Video)";
   wrap.appendChild(hdr);
+
+  if (!_storageReady) {
+    const warn = document.createElement("div");
+    warn.style.cssText = "font-size:0.66rem;color:#F5C518;background:rgba(245,197,24,0.08);border:1px solid rgba(245,197,24,0.25);border-radius:4px;padding:6px 8px;margin-bottom:10px;font-family:'Share Tech Mono',monospace;";
+    warn.textContent = "⚠ Storage not set up — use Link instead of Upload for now";
+    wrap.appendChild(warn);
+  }
 
   const row = document.createElement("div");
   row.className = "_imgrow";
@@ -764,67 +835,72 @@ async function saveAll() {
   const btn = document.getElementById("_savebtn");
   btn.disabled = true; btn.textContent = "⏳ SAVING...";
 
-  // Collect text
-  const texts = {};
-  document.querySelectorAll("#_apbody textarea[data-target]").forEach(ta => {
-    texts[ta.dataset.target] = ta.value;
-  });
+  // The whole function is wrapped in try/finally so the button
+  // is GUARANTEED to reset even if something throws or a
+  // network call hangs — this is what was missing before and
+  // caused the button to freeze on "SAVING TO FIREBASE...".
+  try {
+    const texts = {};
+    document.querySelectorAll("#_apbody textarea[data-target]").forEach(ta => {
+      texts[ta.dataset.target] = ta.value;
+    });
 
-  // Upload images
-  const images = {};
-  if (_ready) {
+    const images = {};
     for (const [key, pending] of Object.entries(_pendingImages)) {
-      btn.textContent = `⬆ UPLOADING ${key}...`;
-      try {
-        if (pending.type === "file") {
+      if (pending.type === "url") {
+        images[key] = pending.url;
+        continue;
+      }
+      if (_storageReady) {
+        btn.textContent = `⬆ UPLOADING ${key}...`;
+        try {
           const path = `site-images/${key}_${Date.now()}.${pending.file.name.split(".").pop()}`;
-          const url = await uploadFile(pending.file, path);
+          const url = await withTimeout(uploadFile(pending.file, path), 20000, `Upload ${key}`);
           images[key] = url;
-          // Update all elements with final URL
           applyImageLocally(key, url, null);
-        } else {
-          images[key] = pending.url;
+        } catch(e) {
+          console.error("Upload failed for", key, e);
+          showToast(`⚠ ${key} upload failed — Storage not set up yet?`, "error");
         }
-      } catch(e) {
-        console.error("Upload failed for", key, e);
-        showToast(`⚠ Upload failed: ${key}`, "error");
+      } else if (pending.dataUrl) {
+        images[key] = pending.dataUrl;
       }
     }
-  } else {
-    // Not connected: store data-urls temporarily (session only)
-    Object.entries(_pendingImages).forEach(([key, p]) => {
-      if (p.dataUrl) images[key] = p.dataUrl;
-      else if (p.url) images[key] = p.url;
-    });
-  }
 
-  // Handle cover
-  let heroCover = undefined;
-  if (_pendingCover !== undefined) {
-    if (_pendingCover === null || !_pendingCover.url) {
-      heroCover = null;
-    } else if (_pendingCover.type === "file" && _ready) {
-      btn.textContent = "⬆ UPLOADING COVER...";
-      try {
-        const ext = _pendingCover.file.name.split(".").pop();
-        const path = `site-images/hero-cover_${Date.now()}.${ext}`;
-        const url = await uploadFile(_pendingCover.file, path);
-        heroCover = { url, type: _pendingCover.type };
-        applyHeroCover(heroCover);
-      } catch(e) { showToast("⚠ Cover upload failed","error"); }
-    } else {
-      heroCover = { url: _pendingCover.url || _pendingCover.dataUrl, type: _pendingCover.type };
+    let heroCover = undefined;
+    if (_pendingCover !== undefined) {
+      if (_pendingCover === null || !_pendingCover.url) {
+        heroCover = null;
+      } else if (_pendingCover.file && _storageReady) {
+        btn.textContent = "⬆ UPLOADING COVER...";
+        try {
+          const ext = _pendingCover.file.name.split(".").pop();
+          const path = `site-images/hero-cover_${Date.now()}.${ext}`;
+          const url = await withTimeout(uploadFile(_pendingCover.file, path), 20000, "Upload cover");
+          heroCover = { url, type: _pendingCover.type };
+          applyHeroCover(heroCover);
+        } catch(e) {
+          showToast("⚠ Cover upload failed — Storage not set up yet?", "error");
+        }
+      } else if (_pendingCover.file && !_storageReady) {
+        heroCover = { url: _pendingCover.dataUrl, type: _pendingCover.type };
+      } else {
+        heroCover = { url: _pendingCover.url || _pendingCover.dataUrl, type: _pendingCover.type };
+      }
     }
+
+    btn.textContent = "💾 SAVING TO FIREBASE...";
+    const ok = await saveToFirebase({ texts, images, heroCover });
+
+    _pendingImages = {};
+    _pendingCover  = undefined;
+
+    if (ok) showToast("✓ All changes saved!");
+  } catch(e) {
+    console.error("Unexpected save error:", e);
+    showToast("⚠ Something went wrong — check browser console (F12)", "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "💾 SAVE ALL CHANGES";
   }
-
-  btn.textContent = "💾 SAVING TO FIREBASE...";
-  const ok = await saveToFirebase({ texts, images, heroCover });
-
-  // Reset pending
-  _pendingImages = {};
-  _pendingCover  = undefined;
-
-  btn.disabled = false;
-  btn.textContent = "💾 SAVE ALL CHANGES";
-  if (ok) showToast("✓ All changes saved!");
 }
