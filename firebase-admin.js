@@ -55,16 +55,16 @@ export async function initFirebase() {
     return;
   }
 
-  // Firestore — uses long-polling auto-detection. The default
-  // WebChannel/streaming transport gets silently blackholed by
-  // some ISPs and corporate proxies (common in parts of South
-  // Asia): no error is thrown, the request just never resolves.
-  // experimentalAutoDetectLongPolling fixes that class of hang.
+  // Firestore — forces long-polling transport directly (skips
+  // the auto-detect probe, saving a round trip). Long-polling
+  // is confirmed working for this deployment: the channel
+  // handshake succeeds, it just needs more time than WebSocket
+  // would for the full listen→rules-check→data round trip.
   try {
     const { initializeFirestore, doc, getDoc, setDoc } = await import(
       "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
     _db = initializeFirestore(app, {
-      experimentalAutoDetectLongPolling: true,
+      experimentalForceLongPolling: true,
       useFetchStreams: false
     });
     _setDoc = setDoc; _doc = doc; _getDoc = getDoc;
@@ -96,7 +96,7 @@ export async function loadAndApplyContent() {
   if (!_dbReady) return;
   try {
     const snap = await withTimeout(
-      _getDoc(_doc(_db, "site-content", "global")), 12000, "Load content"
+      _getDoc(_doc(_db, "site-content", "global")), 30000, "Load content"
     );
     if (!snap.exists()) return;
     const data = snap.data();
@@ -171,7 +171,7 @@ async function saveToFirebase(payload) {
     const ref2 = _doc(_db, "site-content", "global");
     let existing = {};
     try {
-      const snap = await withTimeout(_getDoc(ref2), 12000, "Fetch existing data");
+      const snap = await withTimeout(_getDoc(ref2), 30000, "Fetch existing data");
       if (snap.exists()) existing = snap.data();
     } catch(e) {
       console.warn("Couldn't fetch existing data (continuing with a fresh write):", e.message);
@@ -182,7 +182,7 @@ async function saveToFirebase(payload) {
       images:    Object.assign({}, existing.images    || {}, payload.images    || {}),
       heroCover: payload.heroCover !== undefined ? payload.heroCover : (existing.heroCover || null),
       updatedAt: new Date().toISOString()
-    }), 12000, "Save to Firestore");
+    }), 30000, "Save to Firestore");
     return true;
   } catch(e) {
     console.error("Save error:", e);
@@ -890,7 +890,11 @@ async function saveAll() {
     }
 
     btn.textContent = "💾 SAVING TO FIREBASE...";
+    const slowNotice = setTimeout(() => {
+      btn.textContent = "💾 STILL SAVING — SLOW CONNECTION, PLEASE WAIT...";
+    }, 6000);
     const ok = await saveToFirebase({ texts, images, heroCover });
+    clearTimeout(slowNotice);
 
     _pendingImages = {};
     _pendingCover  = undefined;
