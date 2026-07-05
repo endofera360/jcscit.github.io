@@ -2,6 +2,7 @@
 // JCSC IT Club — Shared Firebase Admin System
 // firebase-admin.js  (loaded as type="module" by all pages)
 // ============================================================
+
 // ─── Firebase config ────────────────────────────────────────
 const FB_CFG = {
   apiKey:            "AIzaSyAeiQooAe8LRj7zp_h0GaUD46WHUrI7tc4",
@@ -12,6 +13,7 @@ const FB_CFG = {
   appId:             "1:253384399169:web:5cded88ff939564cec69c0",
   measurementId:     "G-M3W7GSCG5P"
 };
+
 // ─── State ──────────────────────────────────────────────────
 let _db = null, _storage = null, _dbReady = false, _storageReady = false;
 let _setDoc, _doc, _getDoc, _ref, _uploadBytes, _getURL;
@@ -60,35 +62,41 @@ export async function initFirebase() {
   // would for the full listen→rules-check→data round trip.
 export async function initFirebase() {
   try {
-    // Dynamically import Firebase v9/v10 modules
-    const { initializeApp } = await import("https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js");
+    console.log("🔄 Starting Firebase (v3 Bulletproof)...");
+
+    // 1. Import Core & prevent "App already exists" crash
+    const { initializeApp, getApps, getApp } = await import("https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js");
+    const app = getApps().length === 0 ? initializeApp(FB_CFG) : getApp();
+
+    // 2. Setup Firestore (Database) with Long Polling fix
     const { initializeFirestore, doc, setDoc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js");
-    const { getStorage, ref, uploadBytes, getDownloadURL } = await import("https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js");
-
-    // Initialize the app with your existing FB_CFG
-    const app = initializeApp(FB_CFG);
-
-    // 🔴 THE FIX: Force Long Polling to prevent Vercel/Netlify infinite hanging
+    
     _db = initializeFirestore(app, {
       experimentalForceLongPolling: true 
     });
     
-    _storage = getStorage(app);
-
-    // Assign to your existing global state variables
     _setDoc = setDoc;
     _doc = doc;
     _getDoc = getDoc;
-    _ref = ref;
-    _uploadBytes = uploadBytes;
-    _getURL = getDownloadURL;
-
     _dbReady = true;
-    _storageReady = true;
-    console.log("✅ Firebase Initialized (Long Polling Active)");
-    
+    console.log("✅ Firestore Database Ready!");
+
+    // 3. Safely setup Storage (Prevents crash since you skipped Step 2)
+    try {
+      const { getStorage, ref, uploadBytes, getDownloadURL } = await import("https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js");
+      _storage = getStorage(app);
+      _ref = ref;
+      _uploadBytes = uploadBytes;
+      _getURL = getDownloadURL;
+      _storageReady = true;
+      console.log("✅ Storage Ready!");
+    } catch (storageError) {
+      console.warn("⚠ Storage skipped. You must use image URLs instead of uploading.");
+    }
+
   } catch (error) {
     console.error("❌ Firebase init failed:", error);
+    alert("Firebase connection error. Check console.");
   }
 }
 
