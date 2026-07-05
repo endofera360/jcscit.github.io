@@ -60,19 +60,39 @@ export async function initFirebase() {
   // is confirmed working for this deployment: the channel
   // handshake succeeds, it just needs more time than WebSocket
   // would for the full listen→rules-check→data round trip.
+export async function initFirebase() {
   try {
-    const { initializeFirestore, doc, getDoc, setDoc } = await import(
-      "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+    // Dynamically import Firebase v9/v10 modules
+    const { initializeApp } = await import("[https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js](https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js)");
+    const { initializeFirestore, doc, setDoc, getDoc } = await import("[https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js](https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js)");
+    const { getStorage, ref, uploadBytes, getDownloadURL } = await import("[https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js](https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js)");
+
+    // Initialize the app with your existing FB_CFG
+    const app = initializeApp(FB_CFG);
+
+    // 🔴 THE FIX: Force Long Polling to prevent Vercel/Netlify infinite hanging
     _db = initializeFirestore(app, {
-      experimentalForceLongPolling: true,
-      useFetchStreams: false
+      experimentalForceLongPolling: true 
     });
-    _setDoc = setDoc; _doc = doc; _getDoc = getDoc;
+    
+    _storage = getStorage(app);
+
+    // Assign to your existing global state variables
+    _setDoc = setDoc;
+    _doc = doc;
+    _getDoc = getDoc;
+    _ref = ref;
+    _uploadBytes = uploadBytes;
+    _getURL = getDownloadURL;
+
     _dbReady = true;
-    console.log("✅ Firestore ready");
-  } catch(e) {
-    console.warn("Firestore init failed:", e.message);
+    _storageReady = true;
+    console.log("✅ Firebase Initialized (Long Polling Active)");
+    
+  } catch (error) {
+    console.error("❌ Firebase init failed:", error);
   }
+}
 
   // Storage — optional. Fine for this to fail if the user
   // hasn't provisioned/paid for Storage yet; Link-based images
