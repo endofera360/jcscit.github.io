@@ -1,4 +1,3 @@
-
 // ============================================================
 // JCSC IT Club — Shared Firebase Admin System
 // firebase-admin.js  (loaded as type="module" by all pages)
