@@ -2,7 +2,6 @@
 // JCSC IT Club — Shared Firebase Admin System
 // firebase-admin.js  (loaded as type="module" by all pages)
 // ============================================================
-
 // ─── Firebase config ────────────────────────────────────────
 const FB_CFG = {
   apiKey:            "AIzaSyAeiQooAe8LRj7zp_h0GaUD46WHUrI7tc4",
