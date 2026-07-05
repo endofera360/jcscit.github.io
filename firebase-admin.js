@@ -2,6 +2,7 @@
 // JCSC IT Club — Shared Firebase Admin System
 // firebase-admin.js  (loaded as type="module" by all pages)
 // ============================================================
+
 // ─── Firebase config ────────────────────────────────────────
 const FB_CFG = {
   apiKey:            "AIzaSyAeiQooAe8LRj7zp_h0GaUD46WHUrI7tc4",
@@ -62,9 +63,9 @@ export async function initFirebase() {
 export async function initFirebase() {
   try {
     // Dynamically import Firebase v9/v10 modules
-    const { initializeApp } = await import("[https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js](https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js)");
-    const { initializeFirestore, doc, setDoc, getDoc } = await import("[https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js](https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js)");
-    const { getStorage, ref, uploadBytes, getDownloadURL } = await import("[https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js](https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js)");
+    const { initializeApp } = await import("https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js");
+    const { initializeFirestore, doc, setDoc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js");
+    const { getStorage, ref, uploadBytes, getDownloadURL } = await import("https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js");
 
     // Initialize the app with your existing FB_CFG
     const app = initializeApp(FB_CFG);
