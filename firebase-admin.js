@@ -105,7 +105,7 @@ export async function loadAndApplyContent() {
   }
   try {
     const appId = typeof __app_id !== 'undefined' ? __app_id : 'jcscit';
-    const docRef = _doc(_db, 'artifacts', appId, 'public', 'data', 'site-content');
+    const docRef = _doc(_db, 'artifacts', appId, 'data', 'site-content');
     
     const snap = await withTimeout(
       _getDoc(docRef), 5000, "Load content"
@@ -250,7 +250,7 @@ async function saveToFirebase(payload) {
   if (!_user || _user.isAnonymous) { showToast("⚠ Access Denied: Admin Login Required", "error"); return false; }
   try {
     const appId = typeof __app_id !== 'undefined' ? __app_id : 'jcscit';
-    const ref2 = _doc(_db, 'artifacts', appId, 'public', 'data', 'site-content');
+    const ref2 = _doc(_db, 'artifacts', appId, 'data', 'site-content');
     let existing = {};
     try {
       const snap = await withTimeout(_getDoc(ref2), 10000, "Fetch existing data");
