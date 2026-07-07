@@ -431,7 +431,7 @@ function injectAdminHTML() {
     <div class="_abox">
       <h2>⚙ ADMIN ACCESS</h2>
       <p>JCSC IT CLUB COMMAND CENTER</p>
-      <input type="email" id="_auser" class="_ainput" placeholder="Admin Email" autocomplete="off"
+      <input type="text" id="_auser" class="_ainput" placeholder="Username or Email (e.g. jcsc_admin)" autocomplete="off"
         onkeydown="if(event.key==='Enter')document.getElementById('_apass').focus()">
       <input type="password" id="_apass" class="_ainput" placeholder="Password"
         onkeydown="if(event.key==='Enter')window._adminLogin()">
@@ -479,13 +479,18 @@ function setupTripleClick() {
 }
 
 async function adminLogin() {
-  const email = document.getElementById("_auser").value.trim();
+  let email = document.getElementById("_auser").value.trim();
   const p = document.getElementById("_apass").value;
   const btn = document.getElementById("_aloginbtn");
   
   if (!email || !p) {
-    showToast("⚠ Please enter both email and password", "error");
+    showToast("⚠ Please enter both username/email and password", "error");
     return;
+  }
+
+  // If a simple username like 'jcsc_admin' is provided, append the Firebase project domain internally
+  if (!email.includes("@")) {
+    email = email + "@jcscit.com";
   }
 
   btn.textContent = "AUTHENTICATING...";
