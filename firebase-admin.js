@@ -14,6 +14,7 @@ const FB_CFG = {
 };
 
 let _db = null, _storage = null, _dbReady = false, _storageReady = false;
+let _auth = null, _user = null; // Added auth state
 let _setDoc, _doc, _getDoc, _ref, _uploadBytes, _getURL;
 let _pendingImages = {};   // key → { type:"file"|"url", file?, url? }
 let _pendingCover  = undefined; // undefined = not changed
@@ -35,19 +36,38 @@ function withTimeout(promise, ms, label) {
 }
 
 export async function initFirebase() {
+  initThemeToggle(); // Initialize Theme Toggle immediately so UI doesn't block
+
   try {
     console.log("🔄 Starting Firebase Connection...");
 
-    // 1. Core Init (Prevents 'App already exists' crash)
-    const { initializeApp, getApps, getApp } = await import("https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js");
+    // 1. Core Init
+    const { initializeApp, getApps, getApp } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
     const app = getApps().length === 0 ? initializeApp(FB_CFG) : getApp();
 
-    // 2. Firestore Init (With robust network settings & forced long-polling)
-    const { initializeFirestore, doc, setDoc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js");
+    // 2. Auth Init (Secure Login & System Rule Compliance)
+    const { getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+    _auth = getAuth(app);
     
-    _db = initializeFirestore(app, {
-      experimentalForceLongPolling: true 
+    onAuthStateChanged(_auth, (user) => {
+      _user = user;
+      if (user && user.email) console.log("🔐 Admin Authenticated:", user.email);
     });
+
+    try {
+      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+        await signInWithCustomToken(_auth, __initial_auth_token);
+      } else {
+        await signInAnonymously(_auth);
+      }
+    } catch (authErr) {
+      console.warn("⚠ Initial viewer auth skipped. Admin login will still work.");
+    }
+
+    // 3. Firestore Init
+    const { getFirestore, doc, setDoc, getDoc } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+    
+    _db = getFirestore(app);
     
     _setDoc = setDoc;
     _doc = doc;
@@ -55,9 +75,9 @@ export async function initFirebase() {
     _dbReady = true;
     console.log("✅ Database Connection Succeeded!");
 
-    // 3. Storage Fallback (Gracefully skips if not purchased)
+    // 4. Storage Fallback
     try {
-      const { getStorage, ref, uploadBytes, getDownloadURL } = await import("https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js");
+      const { getStorage, ref, uploadBytes, getDownloadURL } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js");
       _storage = getStorage(app);
       _ref = ref;
       _uploadBytes = uploadBytes;
@@ -73,14 +93,22 @@ export async function initFirebase() {
 
   } catch (error) {
     console.error("❌ Firebase initialization failed:", error);
+    harvestDefaultFAQs();
   }
 }
 
 export async function loadAndApplyContent() {
   if (!_dbReady) return;
+  if (!_user) {
+    harvestDefaultFAQs();
+    return;
+  }
   try {
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'jcscit';
+    const docRef = _doc(_db, 'artifacts', appId, 'public', 'data', 'site-content');
+    
     const snap = await withTimeout(
-      _getDoc(_doc(_db, "site-content", "global")), 30000, "Load content"
+      _getDoc(docRef), 5000, "Load content"
     );
     if (!snap.exists()) {
       // Extract default FAQs from DOM if database is fresh
@@ -219,11 +247,13 @@ function applyHeroCover(data) {
 
 async function saveToFirebase(payload) {
   if (!_dbReady) { showToast("⚠ Database not connected", "error"); return false; }
+  if (!_user || _user.isAnonymous) { showToast("⚠ Access Denied: Admin Login Required", "error"); return false; }
   try {
-    const ref2 = _doc(_db, "site-content", "global");
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'jcscit';
+    const ref2 = _doc(_db, 'artifacts', appId, 'public', 'data', 'site-content');
     let existing = {};
     try {
-      const snap = await withTimeout(_getDoc(ref2), 30000, "Fetch existing data");
+      const snap = await withTimeout(_getDoc(ref2), 10000, "Fetch existing data");
       if (snap.exists()) existing = snap.data();
     } catch(e) {
       console.warn("Continuing with clean document write...", e.message);
@@ -275,13 +305,9 @@ function showToast(msg, type = "success") {
   t._timer = setTimeout(() => { t.style.transform = "translateX(-50%) translateY(120px)"; }, 3500);
 }
 
-const ADMIN_USER = "jcsc_admin";
-const ADMIN_PASS = "itclub2025";
-
 export function initAdminSystem() {
   injectAdminHTML();
   setupTripleClick();
-  initThemeToggle();
 }
 
 function injectAdminHTML() {
@@ -405,11 +431,11 @@ function injectAdminHTML() {
     <div class="_abox">
       <h2>⚙ ADMIN ACCESS</h2>
       <p>JCSC IT CLUB COMMAND CENTER</p>
-      <input type="text" id="_auser" class="_ainput" placeholder="Username" autocomplete="off"
+      <input type="email" id="_auser" class="_ainput" placeholder="Admin Email" autocomplete="off"
         onkeydown="if(event.key==='Enter')document.getElementById('_apass').focus()">
       <input type="password" id="_apass" class="_ainput" placeholder="Password"
         onkeydown="if(event.key==='Enter')window._adminLogin()">
-      <button class="_alogin" onclick="window._adminLogin()">ENTER COMMAND CENTER</button>
+      <button class="_alogin" id="_aloginbtn" onclick="window._adminLogin()">ENTER COMMAND CENTER</button>
       <button class="_acancel" onclick="document.getElementById('_admin_modal').classList.remove('show')">✕ Cancel</button>
     </div>`;
   document.body.appendChild(modal);
@@ -443,24 +469,48 @@ function setupTripleClick() {
     timer = setTimeout(() => { count = 0; }, 900);
     if (count >= 3) {
       count = 0;
-      document.getElementById("_admin_modal").classList.add("show");
+      if (_user && !_user.isAnonymous) {
+        openAdmin(); // Bypass modal if already logged in as true admin
+      } else {
+        document.getElementById("_admin_modal").classList.add("show");
+      }
     }
   });
 }
 
-function adminLogin() {
-  const u = document.getElementById("_auser").value.trim();
+async function adminLogin() {
+  const email = document.getElementById("_auser").value.trim();
   const p = document.getElementById("_apass").value;
-  if (u === ADMIN_USER && p === ADMIN_PASS) {
+  const btn = document.getElementById("_aloginbtn");
+  
+  if (!email || !p) {
+    showToast("⚠ Please enter both email and password", "error");
+    return;
+  }
+
+  btn.textContent = "AUTHENTICATING...";
+  btn.style.opacity = "0.7";
+
+  try {
+    const { signInWithEmailAndPassword } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+    await signInWithEmailAndPassword(_auth, email, p);
+    
     document.getElementById("_admin_modal").classList.remove("show");
     document.getElementById("_auser").value = "";
     document.getElementById("_apass").value = "";
     openAdmin();
-  } else {
+    showToast("✓ Admin Authentication Successful");
+  } catch (error) {
+    console.error("Login failed:", error);
     const box = document.querySelector("._abox");
     box.style.borderColor = "#e74c3c";
     setTimeout(() => { box.style.borderColor = ""; }, 900);
-    showToast("⚠ Wrong credentials", "error");
+    showToast("⚠ " + error.message, "error");
+  } finally {
+    if (btn) {
+      btn.textContent = "ENTER COMMAND CENTER";
+      btn.style.opacity = "1";
+    }
   }
 }
 
