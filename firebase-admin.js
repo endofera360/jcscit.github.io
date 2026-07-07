@@ -1,5 +1,5 @@
 // ============================================================
-// JCSC IT Club — Shared Firebase Admin System (Enhanced & Fixed)
+// JCSC IT Club — Shared Firebase Admin System (Path Error Fixed)
 // firebase-admin.js  (loaded as type="module" by all pages)
 // ============================================================
 
@@ -14,7 +14,7 @@ const FB_CFG = {
 };
 
 let _db = null, _storage = null, _dbReady = false, _storageReady = false;
-let _auth = null, _user = null; // Added auth state
+let _auth = null, _user = null;
 let _setDoc, _doc, _getDoc, _ref, _uploadBytes, _getURL;
 let _pendingImages = {};   // key → { type:"file"|"url", file?, url? }
 let _pendingCover  = undefined; // undefined = not changed
@@ -104,14 +104,14 @@ export async function loadAndApplyContent() {
     return;
   }
   try {
-    const appId = typeof __app_id !== 'undefined' ? __app_id : 'jcscit';
-    const docRef = _doc(_db, 'artifacts', appId, 'data', 'site-content');
+    // FIX: Hardcoded perfectly to 4 segments (Collection -> Doc -> Collection -> Doc)
+    // This entirely prevents the "5 segment" invalid document reference error.
+    const docRef = _doc(_db, 'artifacts', 'jcscit', 'data', 'site-content');
     
     const snap = await withTimeout(
       _getDoc(docRef), 5000, "Load content"
     );
     if (!snap.exists()) {
-      // Extract default FAQs from DOM if database is fresh
       harvestDefaultFAQs();
       return;
     }
@@ -249,8 +249,9 @@ async function saveToFirebase(payload) {
   if (!_dbReady) { showToast("⚠ Database not connected", "error"); return false; }
   if (!_user || _user.isAnonymous) { showToast("⚠ Access Denied: Admin Login Required", "error"); return false; }
   try {
-    const appId = typeof __app_id !== 'undefined' ? __app_id : 'jcscit';
-    const ref2 = _doc(_db, 'artifacts', appId, 'data', 'site-content');
+    // FIX: Hardcoded to exact 4 segments to match load function and bypass errors
+    const ref2 = _doc(_db, 'artifacts', 'jcscit', 'data', 'site-content');
+    
     let existing = {};
     try {
       const snap = await withTimeout(_getDoc(ref2), 10000, "Fetch existing data");
@@ -431,7 +432,7 @@ function injectAdminHTML() {
     <div class="_abox">
       <h2>⚙ ADMIN ACCESS</h2>
       <p>JCSC IT CLUB COMMAND CENTER</p>
-      <input type="text" id="_auser" class="_ainput" placeholder="Username or Email (e.g. jcsc_admin)" autocomplete="off"
+      <input type="text" id="_auser" class="_ainput" placeholder="Username (e.g. jcsc_admin)" autocomplete="off"
         onkeydown="if(event.key==='Enter')document.getElementById('_apass').focus()">
       <input type="password" id="_apass" class="_ainput" placeholder="Password"
         onkeydown="if(event.key==='Enter')window._adminLogin()">
@@ -484,11 +485,11 @@ async function adminLogin() {
   const btn = document.getElementById("_aloginbtn");
   
   if (!email || !p) {
-    showToast("⚠ Please enter both username/email and password", "error");
+    showToast("⚠ Please enter both username and password", "error");
     return;
   }
 
-  // If a simple username like 'jcsc_admin' is provided, append the Firebase project domain internally
+  // Auto-translate simple usernames to Firebase compliant email format
   if (!email.includes("@")) {
     email = email + "@jcscit.com";
   }
@@ -510,7 +511,7 @@ async function adminLogin() {
     const box = document.querySelector("._abox");
     box.style.borderColor = "#e74c3c";
     setTimeout(() => { box.style.borderColor = ""; }, 900);
-    showToast("⚠ " + error.message, "error");
+    showToast("⚠ Authentication Failed. Check credentials.", "error");
   } finally {
     if (btn) {
       btn.textContent = "ENTER COMMAND CENTER";
